@@ -416,7 +416,8 @@ async def get_article_content(url: str = Query(..., description="Article URL to 
             parsed = _urlparse(target_url)
             original_host = parsed.hostname or ""
             port_suffix = f":{parsed.port}" if parsed.port else ""
-            pinned = parsed._replace(netloc=f"{ip}{port_suffix}")
+            ip_host = f"[{ip}]" if ":" in ip else ip
+            pinned = parsed._replace(netloc=f"{ip_host}{port_suffix}")
             return (urlunparse(pinned), original_host)
 
         # Pin to resolved IP to prevent DNS rebinding
