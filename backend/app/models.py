@@ -31,6 +31,16 @@ class BriefingResponse(BaseModel):
     updated_at: datetime
 
 
+class ArticleContent(BaseModel):
+    url: str
+    title: str
+    content: str  # cleaned HTML content for rendering
+    text: str  # plain text version
+    image_url: str | None = None
+    reading_time: int = 3
+    source: str = ""
+
+
 class HealthResponse(BaseModel):
     status: str
     version: str

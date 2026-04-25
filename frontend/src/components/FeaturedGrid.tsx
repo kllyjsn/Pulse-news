@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Clock, ExternalLink } from "lucide-react";
+import { Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { Article } from "../types";
 
@@ -14,21 +14,30 @@ const CATEGORY_COLORS: Record<string, string> = {
 interface FeaturedGridProps {
   articles: Article[];
   loading: boolean;
+  onArticleClick: (article: Article) => void;
 }
 
-function FeaturedCard({ article, index, large }: { article: Article; index: number; large?: boolean }) {
+function FeaturedCard({
+  article,
+  index,
+  large,
+  onClick,
+}: {
+  article: Article;
+  index: number;
+  large?: boolean;
+  onClick: (article: Article) => void;
+}) {
   const color = CATEGORY_COLORS[article.category] || "#6366f1";
 
   return (
-    <motion.a
-      href={article.url}
-      target="_blank"
-      rel="noopener noreferrer"
+    <motion.button
+      onClick={() => onClick(article)}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: index * 0.08, ease: "easeOut" }}
       className={`group relative rounded-2xl overflow-hidden border border-border card-glow
-        flex flex-col ${large ? "row-span-2" : ""}`}
+        flex flex-col text-left cursor-pointer ${large ? "row-span-2" : ""}`}
     >
       {/* Image */}
       <div className={`relative overflow-hidden ${large ? "h-64 sm:h-full" : "h-40"}`}>
@@ -84,17 +93,16 @@ function FeaturedCard({ article, index, large }: { article: Article; index: numb
               {formatDistanceToNow(new Date(article.published), { addSuffix: true })}
             </span>
           )}
-          <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <ExternalLink className="w-3 h-3" />
-            Read
+          <span className="opacity-0 group-hover:opacity-100 transition-opacity text-accent font-medium">
+            Read →
           </span>
         </div>
       </div>
-    </motion.a>
+    </motion.button>
   );
 }
 
-export function FeaturedGrid({ articles, loading }: FeaturedGridProps) {
+export function FeaturedGrid({ articles, loading, onArticleClick }: FeaturedGridProps) {
   if (loading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -112,9 +120,9 @@ export function FeaturedGrid({ articles, loading }: FeaturedGridProps) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      {hero && <FeaturedCard article={hero} index={0} large />}
+      {hero && <FeaturedCard article={hero} index={0} large onClick={onArticleClick} />}
       {side.map((a, i) => (
-        <FeaturedCard key={a.id} article={a} index={i + 1} />
+        <FeaturedCard key={a.id} article={a} index={i + 1} onClick={onArticleClick} />
       ))}
     </div>
   );

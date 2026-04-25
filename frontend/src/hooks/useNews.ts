@@ -12,17 +12,26 @@ export function useNews(category: string) {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async (showLoading = true) => {
+    // Abort any in-flight request for the previous category
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       if (showLoading) setLoading(true);
       setError(null);
 
       const [newsRes, featuredRes, briefingRes] = await Promise.allSettled([
-        fetchNews(category),
-        fetchFeatured(6),
-        fetchBriefing(category),
+        fetchNews(category, 50, 0, controller.signal),
+        fetchFeatured(6, controller.signal),
+        fetchBriefing(category, controller.signal),
       ]);
+
+      // If aborted, don't update state
+      if (controller.signal.aborted) return;
 
       if (newsRes.status === "fulfilled") {
         setArticles(newsRes.value.articles);
@@ -35,9 +44,12 @@ export function useNews(category: string) {
       }
       setLastUpdated(new Date());
     } catch (err) {
+      if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Failed to load news");
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
     }
   }, [category]);
 
@@ -48,6 +60,7 @@ export function useNews(category: string) {
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      abortRef.current?.abort();
     };
   }, [load]);
 

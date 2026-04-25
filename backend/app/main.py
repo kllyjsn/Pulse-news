@@ -15,7 +15,7 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .feeds import CATEGORIES, FEEDS, FeedSource
-from .models import Article, BriefingResponse, HealthResponse, NewsResponse
+from .models import Article, ArticleContent, BriefingResponse, HealthResponse, NewsResponse
 
 app = FastAPI(title="Pulse API", version="1.0.0")
 
@@ -29,6 +29,7 @@ app.add_middleware(
 # ── Caches ────────────────────────────────────────────────
 _article_cache: TTLCache[str, list[Article]] = TTLCache(maxsize=64, ttl=90)
 _briefing_cache: TTLCache[str, BriefingResponse] = TTLCache(maxsize=16, ttl=300)
+_content_cache: TTLCache[str, ArticleContent] = TTLCache(maxsize=128, ttl=600)
 _fetch_lock = asyncio.Lock()
 
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", os.getenv("Perplexity_API_KEY", ""))
@@ -131,39 +132,43 @@ async def _fetch_feed(client: httpx.AsyncClient, source: FeedSource) -> list[Art
 
 
 async def _fetch_category(category: str) -> list[Article]:
-    """Fetch all feeds for a category, with caching."""
+    """Fetch all feeds for a category, with caching and thundering-herd protection."""
     if category in _article_cache:
         return _article_cache[category]
 
-    sources = [f for f in FEEDS if f.category == category]
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        headers={"User-Agent": "Pulse/1.0 (News Aggregator)"},
-    ) as client:
-        results = await asyncio.gather(
-            *[_fetch_feed(client, s) for s in sources],
-            return_exceptions=True,
-        )
+    async with _fetch_lock:
+        if category in _article_cache:
+            return _article_cache[category]
 
-    articles: list[Article] = []
-    for r in results:
-        if isinstance(r, list):
-            articles.extend(r)
+        sources = [f for f in FEEDS if f.category == category]
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            headers={"User-Agent": "Pulse/1.0 (News Aggregator)"},
+        ) as client:
+            results = await asyncio.gather(
+                *[_fetch_feed(client, s) for s in sources],
+                return_exceptions=True,
+            )
 
-    # Sort by published date, newest first
-    articles.sort(key=lambda a: a.published or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        articles: list[Article] = []
+        for r in results:
+            if isinstance(r, list):
+                articles.extend(r)
 
-    # Deduplicate by similar titles
-    seen_titles: set[str] = set()
-    unique: list[Article] = []
-    for a in articles:
-        key = a.title.lower()[:60]
-        if key not in seen_titles:
-            seen_titles.add(key)
-            unique.append(a)
+        # Sort by published date, newest first
+        articles.sort(key=lambda a: a.published or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
-    _article_cache[category] = unique
-    return unique
+        # Deduplicate by similar titles
+        seen_titles: set[str] = set()
+        unique: list[Article] = []
+        for a in articles:
+            key = a.title.lower()[:60]
+            if key not in seen_titles:
+                seen_titles.add(key)
+                unique.append(a)
+
+        _article_cache[category] = unique
+        return unique
 
 
 async def _fetch_all_categories() -> list[Article]:
@@ -171,14 +176,18 @@ async def _fetch_all_categories() -> list[Article]:
     if "all" in _article_cache:
         return _article_cache["all"]
 
-    tasks = [_fetch_category(cat) for cat in CATEGORIES]
-    results = await asyncio.gather(*tasks)
-    all_articles: list[Article] = []
-    for r in results:
-        all_articles.extend(r)
-    all_articles.sort(key=lambda a: a.published or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
-    _article_cache["all"] = all_articles
-    return all_articles
+    async with _fetch_lock:
+        if "all" in _article_cache:
+            return _article_cache["all"]
+
+        tasks = [_fetch_category(cat) for cat in CATEGORIES]
+        results = await asyncio.gather(*tasks)
+        all_articles: list[Article] = []
+        for r in results:
+            all_articles.extend(r)
+        all_articles.sort(key=lambda a: a.published or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        _article_cache["all"] = all_articles
+        return all_articles
 
 
 # ── Routes ────────────────────────────────────────────────
@@ -321,4 +330,89 @@ async def get_briefing(category: str = Query("all")):
             briefing="Unable to generate briefing at this time.",
             key_themes=["News", "Updates", "Analysis"],
             updated_at=datetime.now(timezone.utc),
+        )
+
+
+@app.get("/api/article", response_model=ArticleContent)
+async def get_article_content(url: str = Query(..., description="Article URL to fetch")):
+    """Fetch and extract readable content from an article URL."""
+    if url in _content_cache:
+        return _content_cache[url]
+
+    try:
+        from readability import Document
+        from lxml.html.clean import Cleaner
+        import lxml.html
+
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        ) as client:
+            resp = await client.get(url, timeout=15.0)
+            resp.raise_for_status()
+            html_text = resp.text
+
+        doc = Document(html_text)
+        title = doc.title()
+        content_html = doc.summary(html_partial=True)
+
+        # Clean the HTML for safe rendering
+        cleaner = Cleaner(
+            scripts=True, javascript=True, embedded=True, meta=True,
+            page_structure=False, processing_instructions=True, remove_unknown_tags=False,
+            safe_attrs_only=True, safe_attrs=frozenset([
+                "src", "href", "alt", "title", "class", "width", "height",
+            ]),
+            forms=True, annoying_tags=True, frames=True,
+        )
+        cleaned_html = cleaner.clean_html(content_html)
+        # Remove the wrapper elements the cleaner adds
+        if cleaned_html.startswith("<div>"):
+            cleaned_html = cleaned_html[5:]
+            if cleaned_html.endswith("</div>"):
+                cleaned_html = cleaned_html[:-6]
+
+        # Extract plain text for reading time
+        text_content = _strip_html(content_html)
+        reading_time = max(1, round(len(text_content.split()) / 220))
+
+        # Try to find hero image
+        tree = lxml.html.fromstring(html_text)
+        image_url = None
+        for meta in tree.xpath('//meta[@property="og:image"]'):
+            image_url = meta.get("content")
+            break
+        if not image_url:
+            for meta in tree.xpath('//meta[@name="twitter:image"]'):
+                image_url = meta.get("content")
+                break
+
+        # Extract source domain
+        from urllib.parse import urlparse
+        source = urlparse(url).netloc.replace("www.", "")
+
+        result = ArticleContent(
+            url=url,
+            title=title,
+            content=cleaned_html,
+            text=text_content,
+            image_url=image_url,
+            reading_time=reading_time,
+            source=source,
+        )
+        _content_cache[url] = result
+        return result
+
+    except Exception as e:
+        return ArticleContent(
+            url=url,
+            title="Unable to load article",
+            content=f"<p>Could not extract content from this article. <a href=\"{url}\" target=\"_blank\" rel=\"noopener\">Read on the original site →</a></p>",
+            text="Could not extract content from this article.",
+            reading_time=0,
+            source="",
         )

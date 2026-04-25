@@ -1,17 +1,27 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Header } from "./components/Header";
 import { AIBriefing } from "./components/AIBriefing";
 import { FeaturedGrid } from "./components/FeaturedGrid";
 import { NewsGrid } from "./components/NewsGrid";
 import { Footer } from "./components/Footer";
+import { ArticleReader } from "./components/ArticleReader";
 import { useNews } from "./hooks/useNews";
-import type { CategoryKey } from "./types";
+import type { Article, CategoryKey } from "./types";
 
 export default function App() {
   const [category, setCategory] = useState<CategoryKey>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
   const { articles, featured, briefing, loading, lastUpdated, refresh } = useNews(category);
+
+  const handleArticleClick = useCallback((article: Article) => {
+    setSelectedArticle(article);
+  }, []);
+
+  const handleCloseReader = useCallback(() => {
+    setSelectedArticle(null);
+  }, []);
 
   const filteredArticles = useMemo(() => {
     if (!searchQuery.trim()) return articles;
@@ -24,7 +34,6 @@ export default function App() {
     );
   }, [articles, searchQuery]);
 
-  // Don't show featured articles in the grid
   const featuredIds = useMemo(() => new Set(featured.map((a) => a.id)), [featured]);
   const gridArticles = useMemo(
     () => filteredArticles.filter((a) => !featuredIds.has(a.id)),
@@ -56,7 +65,7 @@ export default function App() {
               <span className="w-1 h-5 rounded-full bg-accent" />
               Top Stories
             </h2>
-            <FeaturedGrid articles={featured} loading={loading} />
+            <FeaturedGrid articles={featured} loading={loading} onArticleClick={handleArticleClick} />
           </section>
         )}
 
@@ -73,11 +82,14 @@ export default function App() {
               </span>
             )}
           </div>
-          <NewsGrid articles={gridArticles} loading={loading} />
+          <NewsGrid articles={gridArticles} loading={loading} onArticleClick={handleArticleClick} />
         </section>
       </main>
 
       <Footer />
+
+      {/* Article Reader */}
+      <ArticleReader article={selectedArticle} onClose={handleCloseReader} />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import type { Article } from "../types";
 interface NewsGridProps {
   articles: Article[];
   loading: boolean;
+  onArticleClick: (article: Article) => void;
 }
 
 function LoadingSkeleton() {
@@ -25,7 +26,7 @@ function LoadingSkeleton() {
   );
 }
 
-export function NewsGrid({ articles, loading }: NewsGridProps) {
+export function NewsGrid({ articles, loading, onArticleClick }: NewsGridProps) {
   if (loading) return <LoadingSkeleton />;
 
   if (articles.length === 0) {
@@ -39,7 +40,7 @@ export function NewsGrid({ articles, loading }: NewsGridProps) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
       {articles.map((article, i) => (
-        <ArticleCard key={article.id} article={article} index={i} />
+        <ArticleCard key={article.id} article={article} index={i} onClick={onArticleClick} />
       ))}
     </div>
   );

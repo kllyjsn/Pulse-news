@@ -33,3 +33,13 @@ export interface CategoryInfo {
 export type CategoryMap = Record<string, CategoryInfo>;
 
 export type CategoryKey = "all" | "tech" | "ai" | "business" | "money" | "geopolitics";
+
+export interface ArticleContent {
+  url: string;
+  title: string;
+  content: string;
+  text: string;
+  image_url: string | null;
+  reading_time: number;
+  source: string;
+}

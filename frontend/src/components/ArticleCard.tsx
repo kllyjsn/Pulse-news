@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Clock, ExternalLink, BookOpen } from "lucide-react";
+import { Clock, BookOpen } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { Article } from "../types";
 
@@ -14,20 +14,19 @@ const CATEGORY_COLORS: Record<string, string> = {
 interface ArticleCardProps {
   article: Article;
   index: number;
+  onClick: (article: Article) => void;
 }
 
-export function ArticleCard({ article, index }: ArticleCardProps) {
+export function ArticleCard({ article, index, onClick }: ArticleCardProps) {
   const color = CATEGORY_COLORS[article.category] || "#6366f1";
 
   return (
-    <motion.a
-      href={article.url}
-      target="_blank"
-      rel="noopener noreferrer"
+    <motion.button
+      onClick={() => onClick(article)}
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, delay: Math.min(index * 0.04, 0.5), ease: "easeOut" }}
-      className="group flex flex-col rounded-xl border border-border bg-surface-2/50 card-glow overflow-hidden"
+      className="group flex flex-col rounded-xl border border-border bg-surface-2/50 card-glow overflow-hidden text-left cursor-pointer"
     >
       {/* Image */}
       {article.image_url && (
@@ -95,12 +94,11 @@ export function ArticleCard({ article, index }: ArticleCardProps) {
               {article.reading_time} min
             </span>
           </div>
-          <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-accent">
-            <ExternalLink className="w-3 h-3" />
-            Read
+          <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-accent text-xs font-medium">
+            Read →
           </span>
         </div>
       </div>
-    </motion.a>
+    </motion.button>
   );
 }
