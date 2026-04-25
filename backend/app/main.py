@@ -384,7 +384,7 @@ async def get_article_content(url: str = Query(..., description="Article URL to 
     """Fetch and extract readable content from an article URL."""
     from html import escape as html_escape
 
-    validation_error, resolved_ip = await _validate_url(url)
+    validation_error, _resolved_ip = await _validate_url(url)
     if validation_error:
         safe_url = html_escape(url, quote=True)
         return ArticleContent(
@@ -403,43 +403,25 @@ async def get_article_content(url: str = Query(..., description="Article URL to 
         from readability import Document
         from lxml.html.clean import Cleaner
         import lxml.html
-        from urllib.parse import urlparse as _urlparse, urlunparse
-
         _headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
         }
 
-        def _pin_url_to_ip(target_url: str, ip: str) -> tuple[str, str]:
-            """Replace hostname with pinned IP, return (pinned_url, original_host)."""
-            parsed = _urlparse(target_url)
-            original_host = parsed.hostname or ""
-            port_suffix = f":{parsed.port}" if parsed.port else ""
-            ip_host = f"[{ip}]" if ":" in ip else ip
-            pinned = parsed._replace(netloc=f"{ip_host}{port_suffix}")
-            return (urlunparse(pinned), original_host)
-
-        # Pin to resolved IP to prevent DNS rebinding
+        # Manual redirect loop — validate each hop to block SSRF via redirects
         async with httpx.AsyncClient(
             follow_redirects=False,
             headers=_headers,
         ) as client:
             current_url = url
-            current_ip = resolved_ip
             for _ in range(5):
-                pinned_url, original_host = _pin_url_to_ip(current_url, current_ip)
-                resp = await client.get(
-                    pinned_url,
-                    headers={**_headers, "Host": original_host},
-                    timeout=15.0,
-                )
+                resp = await client.get(current_url, timeout=15.0)
                 if resp.is_redirect:
                     current_url = str(resp.next_request.url) if resp.next_request else ""
-                    redirect_err, redirect_ip = await _validate_url(current_url)
+                    redirect_err, _ = await _validate_url(current_url)
                     if redirect_err:
                         raise ValueError(f"Redirect blocked: {redirect_err}")
-                    current_ip = redirect_ip
                     continue
                 break
             resp.raise_for_status()
@@ -456,7 +438,7 @@ async def get_article_content(url: str = Query(..., description="Article URL to 
             safe_attrs_only=True, safe_attrs=frozenset([
                 "src", "href", "alt", "title", "class", "width", "height",
             ]),
-            forms=True, annoying_tags=True, frames=True,
+            forms=True, annoying_tags=True, frames=True, style=True,
         )
         cleaned_html = cleaner.clean_html(content_html)
         # Remove the wrapper elements the cleaner adds
