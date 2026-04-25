@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Clock, BookOpen, ExternalLink, Loader2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
@@ -23,31 +23,35 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
-  const loadContent = useCallback(async (url: string) => {
+  useEffect(() => {
+    if (!article) {
+      document.body.style.overflow = "";
+      return;
+    }
+
+    document.body.style.overflow = "hidden";
+    const controller = new AbortController();
+
     setLoading(true);
     setError(false);
     setContent(null);
-    try {
-      const data = await fetchArticleContent(url);
-      setContent(data);
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
-  useEffect(() => {
-    if (article) {
-      loadContent(article.url);
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
+    fetchArticleContent(article.url, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) setContent(data);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setError(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
     return () => {
+      controller.abort();
       document.body.style.overflow = "";
     };
-  }, [article, loadContent]);
+  }, [article]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
