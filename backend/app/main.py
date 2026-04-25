@@ -492,7 +492,9 @@ async def get_article_content(url: str = Query(..., description="Article URL to 
         _content_cache[url] = result
         return result
 
-    except Exception:
+    except Exception as exc:
+        import logging
+        logging.getLogger("pulse").exception("Article extraction failed for %s", url)
         safe_url = html_escape(url, quote=True)
         return ArticleContent(
             url=url,
