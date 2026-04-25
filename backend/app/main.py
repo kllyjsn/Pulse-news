@@ -436,6 +436,8 @@ async def get_article_content(url: str = Query(..., description="Article URL to 
                         raise ValueError(f"Redirect blocked: {redirect_err}")
                     continue
                 break
+            else:
+                raise ValueError("Too many redirects")
             resp.raise_for_status()
             html_text = resp.text
 
