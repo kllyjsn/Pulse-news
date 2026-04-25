@@ -163,12 +163,16 @@ async def _fetch_category_inner(category: str) -> list[Article]:
 
 async def _fetch_category(category: str) -> list[Article]:
     """Fetch all feeds for a category, with caching and thundering-herd protection."""
-    if category in _article_cache:
+    try:
         return _article_cache[category]
+    except KeyError:
+        pass
 
     async with _fetch_lock:
-        if category in _article_cache:
+        try:
             return _article_cache[category]
+        except KeyError:
+            pass
 
         unique = await _fetch_category_inner(category)
         _article_cache[category] = unique
@@ -177,12 +181,16 @@ async def _fetch_category(category: str) -> list[Article]:
 
 async def _fetch_all_categories() -> list[Article]:
     """Fetch articles from all categories."""
-    if "all" in _article_cache:
+    try:
         return _article_cache["all"]
+    except KeyError:
+        pass
 
     async with _fetch_lock:
-        if "all" in _article_cache:
+        try:
             return _article_cache["all"]
+        except KeyError:
+            pass
 
         results = await asyncio.gather(
             *[_fetch_category_inner(cat) for cat in CATEGORIES]
@@ -272,8 +280,10 @@ async def get_featured(limit: int = Query(6, ge=1, le=20)):
 async def get_briefing(category: str = Query("all")):
     """AI-powered briefing using Perplexity API."""
     cache_key = f"briefing:{category}"
-    if cache_key in _briefing_cache:
+    try:
         return _briefing_cache[cache_key]
+    except KeyError:
+        pass
 
     if not PERPLEXITY_API_KEY:
         return BriefingResponse(
@@ -396,8 +406,10 @@ async def get_article_content(url: str = Query(..., description="Article URL to 
             source="",
         )
 
-    if url in _content_cache:
+    try:
         return _content_cache[url]
+    except KeyError:
+        pass
 
     try:
         from readability import Document
