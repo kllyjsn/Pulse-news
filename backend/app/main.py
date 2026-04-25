@@ -492,16 +492,13 @@ async def get_article_content(url: str = Query(..., description="Article URL to 
         _content_cache[url] = result
         return result
 
-    except Exception as exc:
-        import traceback
-        err_detail = traceback.format_exc()
-        print(f"ARTICLE_ERROR: {err_detail}", flush=True)
+    except Exception:
         safe_url = html_escape(url, quote=True)
         return ArticleContent(
             url=url,
             title="Unable to load article",
-            content=f"<p>DEBUG: {html_escape(str(exc))} | {html_escape(type(exc).__name__)}. <a href=\"{safe_url}\" target=\"_blank\" rel=\"noopener\">Read on the original site →</a></p>",
-            text=f"DEBUG: {str(exc)}",
+            content=f"<p>Could not extract content from this article. <a href=\"{safe_url}\" target=\"_blank\" rel=\"noopener\">Read on the original site →</a></p>",
+            text="Could not extract content from this article.",
             reading_time=0,
             source="",
         )
