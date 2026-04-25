@@ -344,10 +344,24 @@ async def get_briefing(category: str = Query("all")):
         )
 
 
-def _validate_url(url: str) -> str | None:
-    """Validate URL to prevent SSRF. Returns error message or None if valid."""
+def _is_ip_safe(hostname: str) -> str | None:
+    """Check resolved IPs are public. Returns error message or None if safe."""
     import ipaddress
     import socket
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+        for family, _type, _proto, _canonname, sockaddr in addr_info:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return "URLs pointing to internal networks are not allowed"
+    except (socket.gaierror, ValueError):
+        return "Could not resolve hostname"
+    return None
+
+
+async def _validate_url(url: str) -> str | None:
+    """Validate URL to prevent SSRF. Returns error message or None if valid."""
     from urllib.parse import urlparse
 
     parsed = urlparse(url)
@@ -358,16 +372,8 @@ def _validate_url(url: str) -> str | None:
     if not hostname:
         return "Invalid URL"
 
-    try:
-        addr_info = socket.getaddrinfo(hostname, None)
-        for family, _type, _proto, _canonname, sockaddr in addr_info:
-            ip = ipaddress.ip_address(sockaddr[0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                return "URLs pointing to internal networks are not allowed"
-    except (socket.gaierror, ValueError):
-        return "Could not resolve hostname"
-
-    return None
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _is_ip_safe, hostname)
 
 
 @app.get("/api/article", response_model=ArticleContent)
@@ -375,7 +381,7 @@ async def get_article_content(url: str = Query(..., description="Article URL to 
     """Fetch and extract readable content from an article URL."""
     from html import escape as html_escape
 
-    validation_error = _validate_url(url)
+    validation_error = await _validate_url(url)
     if validation_error:
         safe_url = html_escape(url, quote=True)
         return ArticleContent(
@@ -395,15 +401,27 @@ async def get_article_content(url: str = Query(..., description="Article URL to 
         from lxml.html.clean import Cleaner
         import lxml.html
 
+        _headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+        # Follow redirects manually so we can validate each hop
         async with httpx.AsyncClient(
-            follow_redirects=True,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
+            follow_redirects=False,
+            headers=_headers,
         ) as client:
-            resp = await client.get(url, timeout=15.0)
+            current_url = url
+            for _ in range(5):
+                resp = await client.get(current_url, timeout=15.0)
+                if resp.is_redirect:
+                    current_url = str(resp.next_request.url) if resp.next_request else ""
+                    redirect_err = await _validate_url(current_url)
+                    if redirect_err:
+                        raise ValueError(f"Redirect blocked: {redirect_err}")
+                    continue
+                break
             resp.raise_for_status()
             html_text = resp.text
 
