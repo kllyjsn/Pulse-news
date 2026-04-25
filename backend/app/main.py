@@ -131,6 +131,36 @@ async def _fetch_feed(client: httpx.AsyncClient, source: FeedSource) -> list[Art
     return articles
 
 
+async def _fetch_category_inner(category: str) -> list[Article]:
+    """Fetch and deduplicate feeds for a single category (no locking)."""
+    sources = [f for f in FEEDS if f.category == category]
+    async with httpx.AsyncClient(
+        follow_redirects=True,
+        headers={"User-Agent": "Pulse/1.0 (News Aggregator)"},
+    ) as client:
+        results = await asyncio.gather(
+            *[_fetch_feed(client, s) for s in sources],
+            return_exceptions=True,
+        )
+
+    articles: list[Article] = []
+    for r in results:
+        if isinstance(r, list):
+            articles.extend(r)
+
+    articles.sort(key=lambda a: a.published or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+    seen_titles: set[str] = set()
+    unique: list[Article] = []
+    for a in articles:
+        key = a.title.lower()[:60]
+        if key not in seen_titles:
+            seen_titles.add(key)
+            unique.append(a)
+
+    return unique
+
+
 async def _fetch_category(category: str) -> list[Article]:
     """Fetch all feeds for a category, with caching and thundering-herd protection."""
     if category in _article_cache:
@@ -140,33 +170,7 @@ async def _fetch_category(category: str) -> list[Article]:
         if category in _article_cache:
             return _article_cache[category]
 
-        sources = [f for f in FEEDS if f.category == category]
-        async with httpx.AsyncClient(
-            follow_redirects=True,
-            headers={"User-Agent": "Pulse/1.0 (News Aggregator)"},
-        ) as client:
-            results = await asyncio.gather(
-                *[_fetch_feed(client, s) for s in sources],
-                return_exceptions=True,
-            )
-
-        articles: list[Article] = []
-        for r in results:
-            if isinstance(r, list):
-                articles.extend(r)
-
-        # Sort by published date, newest first
-        articles.sort(key=lambda a: a.published or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
-
-        # Deduplicate by similar titles
-        seen_titles: set[str] = set()
-        unique: list[Article] = []
-        for a in articles:
-            key = a.title.lower()[:60]
-            if key not in seen_titles:
-                seen_titles.add(key)
-                unique.append(a)
-
+        unique = await _fetch_category_inner(category)
         _article_cache[category] = unique
         return unique
 
@@ -180,12 +184,19 @@ async def _fetch_all_categories() -> list[Article]:
         if "all" in _article_cache:
             return _article_cache["all"]
 
-        tasks = [_fetch_category(cat) for cat in CATEGORIES]
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(
+            *[_fetch_category_inner(cat) for cat in CATEGORIES]
+        )
         all_articles: list[Article] = []
         for r in results:
             all_articles.extend(r)
         all_articles.sort(key=lambda a: a.published or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+        # Cache individual categories too
+        for cat, cat_articles in zip(CATEGORIES, results):
+            if cat not in _article_cache:
+                _article_cache[cat] = cat_articles
+
         _article_cache["all"] = all_articles
         return all_articles
 
@@ -333,9 +344,49 @@ async def get_briefing(category: str = Query("all")):
         )
 
 
+def _validate_url(url: str) -> str | None:
+    """Validate URL to prevent SSRF. Returns error message or None if valid."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "Only http and https URLs are allowed"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return "Invalid URL"
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+        for family, _type, _proto, _canonname, sockaddr in addr_info:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return "URLs pointing to internal networks are not allowed"
+    except (socket.gaierror, ValueError):
+        return "Could not resolve hostname"
+
+    return None
+
+
 @app.get("/api/article", response_model=ArticleContent)
 async def get_article_content(url: str = Query(..., description="Article URL to fetch")):
     """Fetch and extract readable content from an article URL."""
+    from html import escape as html_escape
+
+    validation_error = _validate_url(url)
+    if validation_error:
+        safe_url = html_escape(url, quote=True)
+        return ArticleContent(
+            url=url,
+            title="Invalid URL",
+            content=f"<p>{html_escape(validation_error)}. <a href=\"{safe_url}\" target=\"_blank\" rel=\"noopener\">Try the original site →</a></p>",
+            text=validation_error,
+            reading_time=0,
+            source="",
+        )
+
     if url in _content_cache:
         return _content_cache[url]
 
@@ -407,11 +458,12 @@ async def get_article_content(url: str = Query(..., description="Article URL to 
         _content_cache[url] = result
         return result
 
-    except Exception as e:
+    except Exception:
+        safe_url = html_escape(url, quote=True)
         return ArticleContent(
             url=url,
             title="Unable to load article",
-            content=f"<p>Could not extract content from this article. <a href=\"{url}\" target=\"_blank\" rel=\"noopener\">Read on the original site →</a></p>",
+            content=f"<p>Could not extract content from this article. <a href=\"{safe_url}\" target=\"_blank\" rel=\"noopener\">Read on the original site →</a></p>",
             text="Could not extract content from this article.",
             reading_time=0,
             source="",
