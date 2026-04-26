@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Clock, BookOpen, ExternalLink, Loader2 } from "lucide-react";
+import { X, Clock, BookOpen, ExternalLink, Loader2, RotateCcw } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { fetchArticleContent } from "../lib/api";
 import type { Article, ArticleContent } from "../types";
@@ -22,6 +22,16 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
   const [content, setContent] = useState<ArticleContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [readProgress, setReadProgress] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const progress = scrollHeight <= clientHeight ? 100 : Math.round((scrollTop / (scrollHeight - clientHeight)) * 100);
+    setReadProgress(progress);
+  }, []);
 
   useEffect(() => {
     if (!article) {
@@ -35,6 +45,7 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
     setLoading(true);
     setError(false);
     setContent(null);
+    setReadProgress(0);
 
     fetchArticleContent(article.url, controller.signal)
       .then((data) => {
@@ -125,8 +136,18 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
               </div>
             </div>
 
+            {/* Reading progress bar */}
+            {content && !loading && (
+              <div className="h-0.5 bg-surface-3">
+                <div
+                  className="h-full bg-accent transition-all duration-150 ease-out"
+                  style={{ width: `${readProgress}%` }}
+                />
+              </div>
+            )}
+
             {/* Content area */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto" ref={scrollRef} onScroll={handleScroll}>
               {/* Hero image */}
               {(content?.image_url || article.image_url) && (
                 <div className="relative h-56 sm:h-72 overflow-hidden">
@@ -170,15 +191,32 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
                 {error && (
                   <div className="text-center py-12">
                     <p className="text-text-secondary mb-4">Could not extract article content.</p>
-                    <a
-                      href={article.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-colors"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      Read on original site
-                    </a>
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        onClick={() => {
+                          setError(false);
+                          setLoading(true);
+                          setContent(null);
+                          fetchArticleContent(article.url)
+                            .then(setContent)
+                            .catch(() => setError(true))
+                            .finally(() => setLoading(false));
+                        }}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-surface-3 text-text-primary text-sm font-medium hover:bg-surface-3/80 transition-colors border border-border"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        Retry
+                      </button>
+                      <a
+                        href={article.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-colors"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                        Read on original site
+                      </a>
+                    </div>
                   </div>
                 )}
 

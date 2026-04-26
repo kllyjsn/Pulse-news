@@ -1,4 +1,4 @@
-import { Search, Zap, RefreshCw } from "lucide-react";
+import { Search, Zap, RefreshCw, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { CategoryKey } from "../types";
 
@@ -18,6 +18,7 @@ interface HeaderProps {
   onSearchChange: (q: string) => void;
   lastUpdated: Date | null;
   onRefresh: () => void;
+  loading?: boolean;
 }
 
 export function Header({
@@ -27,6 +28,7 @@ export function Header({
   onSearchChange,
   lastUpdated,
   onRefresh,
+  loading,
 }: HeaderProps) {
   return (
     <header className="sticky top-0 z-50 glass">
@@ -56,8 +58,9 @@ export function Header({
               onClick={onRefresh}
               className="p-2 rounded-lg hover:bg-surface-3 transition-colors text-text-secondary hover:text-text-primary"
               title="Refresh"
+              disabled={loading}
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className={`w-4 h-4 transition-transform ${loading ? "animate-spin" : ""}`} />
             </button>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
@@ -66,11 +69,19 @@ export function Header({
                 placeholder="Search news..."
                 value={searchQuery}
                 onChange={(e) => onSearchChange(e.target.value)}
-                className="w-48 sm:w-64 pl-9 pr-3 py-2 rounded-xl bg-surface-2 border border-border
+                className={`w-48 sm:w-64 pl-9 ${searchQuery ? "pr-8" : "pr-3"} py-2 rounded-xl bg-surface-2 border border-border
                   text-sm text-text-primary placeholder-text-muted
                   focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30
-                  transition-all"
+                  transition-all`}
               />
+              {searchQuery && (
+                <button
+                  onClick={() => onSearchChange("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-surface-3 transition-colors text-text-muted hover:text-text-primary"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </div>
         </div>

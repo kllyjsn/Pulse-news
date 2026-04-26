@@ -5,25 +5,96 @@ import hashlib
 import os
 import re
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from html import unescape
 
 import feedparser
 import httpx
 from cachetools import TTLCache
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .feeds import CATEGORIES, FEEDS, FeedSource
 from .models import Article, ArticleContent, BriefingResponse, HealthResponse, NewsResponse
 
+# ── Allowed origins ───────────────────────────────────────
+_ALLOWED_ORIGINS = [
+    "https://dist-pyrmijiy.devinapps.com",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+
 app = FastAPI(title="Pulse API", version="1.0.0")
 
+
+# ── Security headers middleware ───────────────────────────
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=(), payment=()"
+        )
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "img-src * data:; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "script-src 'self'; "
+            "connect-src 'self'"
+        )
+        return response
+
+
+# ── Rate limiting middleware ──────────────────────────────
+_rate_limits: dict[str, list[float]] = defaultdict(list)
+_RATE_WINDOW = 60  # seconds
+_RATE_MAX_REQUESTS = 60  # per window
+_RATE_MAX_ARTICLE = 20  # article endpoint is more expensive
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.monotonic()
+        key = client_ip
+
+        # Choose limit based on endpoint
+        is_article = request.url.path == "/api/article"
+        max_req = _RATE_MAX_ARTICLE if is_article else _RATE_MAX_REQUESTS
+        if is_article:
+            key = f"{client_ip}:article"
+
+        # Prune old entries
+        timestamps = _rate_limits[key]
+        _rate_limits[key] = [t for t in timestamps if now - t < _RATE_WINDOW]
+
+        if len(_rate_limits[key]) >= max_req:
+            retry_after = int(_RATE_WINDOW - (now - _rate_limits[key][0]))
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests. Please try again later."},
+                headers={"Retry-After": str(max(1, retry_after))},
+            )
+
+        _rate_limits[key].append(now)
+        return await call_next(request)
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_methods=["GET"],
+    allow_headers=["Content-Type", "Accept"],
+    max_age=3600,
 )
 
 # ── Caches ────────────────────────────────────────────────
@@ -389,10 +460,23 @@ async def _validate_url(url: str) -> tuple[str | None, str | None]:
     return await loop.run_in_executor(None, _resolve_and_validate, hostname)
 
 
+_MAX_URL_LEN = 2048
+
+
 @app.get("/api/article", response_model=ArticleContent)
 async def get_article_content(url: str = Query(..., description="Article URL to fetch")):
     """Fetch and extract readable content from an article URL."""
     from html import escape as html_escape
+
+    if len(url) > _MAX_URL_LEN:
+        return ArticleContent(
+            url=url[:_MAX_URL_LEN],
+            title="Invalid URL",
+            content="<p>URL is too long.</p>",
+            text="URL is too long.",
+            reading_time=0,
+            source="",
+        )
 
     validation_error, _resolved_ip = await _validate_url(url)
     if validation_error:

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Header } from "./components/Header";
 import { AIBriefing } from "./components/AIBriefing";
 import { FeaturedGrid } from "./components/FeaturedGrid";
@@ -13,7 +13,11 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
-  const { articles, featured, briefing, loading, lastUpdated, refresh } = useNews(category);
+  const { articles, featured, briefing, loading, lastUpdated, error, refresh } = useNews(category);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [category]);
 
   const handleArticleClick = useCallback((article: Article) => {
     setSelectedArticle(article);
@@ -52,9 +56,23 @@ export default function App() {
         onSearchChange={setSearchQuery}
         lastUpdated={lastUpdated}
         onRefresh={refresh}
+        loading={loading}
       />
 
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 space-y-8">
+        {/* Error state */}
+        {error && !loading && (
+          <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-6 text-center">
+            <p className="text-text-secondary mb-3">{error}</p>
+            <button
+              onClick={() => refresh()}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
         {/* AI Briefing */}
         <AIBriefing briefing={briefing} loading={loading} />
 

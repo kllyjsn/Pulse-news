@@ -31,8 +31,9 @@ export function NewsGrid({ articles, loading, onArticleClick }: NewsGridProps) {
 
   if (articles.length === 0) {
     return (
-      <div className="text-center py-16">
-        <p className="text-text-muted text-lg">No articles found</p>
+      <div className="text-center py-16 space-y-2">
+        <p className="text-text-secondary text-lg font-medium">No articles found</p>
+        <p className="text-text-muted text-sm">Try a different search term or category</p>
       </div>
     );
   }
