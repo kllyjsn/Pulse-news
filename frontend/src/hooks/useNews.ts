@@ -42,7 +42,12 @@ export function useNews(category: string) {
       if (briefingRes.status === "fulfilled") {
         setBriefing(briefingRes.value);
       }
-      setLastUpdated(new Date());
+
+      if (newsRes.status === "rejected" && featuredRes.status === "rejected" && briefingRes.status === "rejected") {
+        setError("Failed to load news. Please check your connection and try again.");
+      } else {
+        setLastUpdated(new Date());
+      }
     } catch (err) {
       if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Failed to load news");

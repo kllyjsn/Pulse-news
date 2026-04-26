@@ -5,7 +5,6 @@ import hashlib
 import os
 import re
 import time
-from collections import defaultdict
 from datetime import datetime, timezone
 from html import unescape
 
@@ -53,7 +52,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 # ── Rate limiting middleware ──────────────────────────────
-_rate_limits: dict[str, list[float]] = defaultdict(list)
+_rate_limits: dict[str, list[float]] = {}
 _RATE_WINDOW = 60  # seconds
 _RATE_MAX_REQUESTS = 60  # per window
 _RATE_MAX_ARTICLE = 20  # article endpoint is more expensive
@@ -71,19 +70,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if is_article:
             key = f"{client_ip}:article"
 
-        # Prune old entries
-        timestamps = _rate_limits[key]
-        _rate_limits[key] = [t for t in timestamps if now - t < _RATE_WINDOW]
+        # Prune old entries and evict empty keys
+        if key in _rate_limits:
+            _rate_limits[key] = [t for t in _rate_limits[key] if now - t < _RATE_WINDOW]
+            if not _rate_limits[key]:
+                del _rate_limits[key]
 
-        if len(_rate_limits[key]) >= max_req:
-            retry_after = int(_RATE_WINDOW - (now - _rate_limits[key][0]))
+        timestamps = _rate_limits.get(key, [])
+        if len(timestamps) >= max_req:
+            retry_after = int(_RATE_WINDOW - (now - timestamps[0]))
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Too many requests. Please try again later."},
                 headers={"Retry-After": str(max(1, retry_after))},
             )
 
-        _rate_limits[key].append(now)
+        _rate_limits.setdefault(key, []).append(now)
         return await call_next(request)
 
 
