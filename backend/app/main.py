@@ -22,6 +22,7 @@ from .models import Article, ArticleContent, BriefingResponse, HealthResponse, N
 # ── Allowed origins ───────────────────────────────────────
 _ALLOWED_ORIGINS = [
     "https://dist-pyrmijiy.devinapps.com",
+    "https://dist-cqufnhny.devinapps.com",
     "http://localhost:5173",
     "http://localhost:3000",
 ]
