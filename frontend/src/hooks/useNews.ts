@@ -77,6 +77,8 @@ export function useNews(category: string) {
   }, [category]);
 
   useEffect(() => {
+    setNewArticleCount(0);
+    prevIdsRef.current = new Set();
     load(true);
 
     intervalRef.current = setInterval(() => load(false), REFRESH_INTERVAL);

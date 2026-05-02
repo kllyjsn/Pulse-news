@@ -80,10 +80,11 @@ export default function App() {
     );
   }, [displayArticles, searchQuery]);
 
+  const showFeatured = category === "all" && !searchQuery;
   const featuredIds = useMemo(() => new Set(featured.map((a) => a.id)), [featured]);
   const gridArticles = useMemo(
-    () => filteredArticles.filter((a) => !featuredIds.has(a.id)),
-    [filteredArticles, featuredIds]
+    () => showFeatured ? filteredArticles.filter((a) => !featuredIds.has(a.id)) : filteredArticles,
+    [filteredArticles, featuredIds, showFeatured]
   );
 
   return (
@@ -135,7 +136,7 @@ export default function App() {
         )}
 
         {/* Featured stories — only show on "all" tab without search */}
-        {category === "all" && !searchQuery && (
+        {showFeatured && (
           <section>
             <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
               <span className="w-1 h-5 rounded-full bg-accent" aria-hidden="true" />

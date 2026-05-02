@@ -7,10 +7,9 @@ interface NewArticlesToastProps {
 }
 
 export function NewArticlesToast({ count, onDismiss }: NewArticlesToastProps) {
-  if (count <= 0) return null;
-
   return (
     <AnimatePresence>
+      {count > 0 && (
       <motion.button
         initial={{ opacity: 0, y: -20, scale: 0.9 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -28,6 +27,7 @@ export function NewArticlesToast({ count, onDismiss }: NewArticlesToastProps) {
         <ArrowUp className="w-3.5 h-3.5" />
         {count} new {count === 1 ? "article" : "articles"}
       </motion.button>
+      )}
     </AnimatePresence>
   );
 }
