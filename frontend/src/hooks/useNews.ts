@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Article, BriefingResponse } from "../types";
-import { fetchNews, fetchFeatured, fetchBriefing } from "../lib/api";
+import { fetchNews, fetchFeatured, fetchBriefing, fetchNewsMeta } from "../lib/api";
+import type { NewsMeta } from "../lib/api";
 
 const REFRESH_INTERVAL = 60_000;
 
@@ -8,14 +9,16 @@ export function useNews(category: string) {
   const [articles, setArticles] = useState<Article[]>([]);
   const [featured, setFeatured] = useState<Article[]>([]);
   const [briefing, setBriefing] = useState<BriefingResponse | null>(null);
+  const [meta, setMeta] = useState<NewsMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [newArticleCount, setNewArticleCount] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const prevIdsRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async (showLoading = true) => {
-    // Abort any in-flight request for the previous category
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -24,23 +27,38 @@ export function useNews(category: string) {
       if (showLoading) setLoading(true);
       setError(null);
 
-      const [newsRes, featuredRes, briefingRes] = await Promise.allSettled([
-        fetchNews(category, 50, 0, controller.signal),
+      const isSaved = category === "saved";
+      const fetchCat = isSaved ? "all" : category;
+
+      const [newsRes, featuredRes, briefingRes, metaRes] = await Promise.allSettled([
+        fetchNews(fetchCat, 100, 0, controller.signal),
         fetchFeatured(6, controller.signal),
-        fetchBriefing(category, controller.signal),
+        isSaved ? Promise.resolve(null) : fetchBriefing(fetchCat, controller.signal),
+        fetchNewsMeta(fetchCat, controller.signal),
       ]);
 
-      // If aborted, don't update state
       if (controller.signal.aborted) return;
 
       if (newsRes.status === "fulfilled") {
-        setArticles(newsRes.value.articles);
+        const newArticles = newsRes.value.articles;
+        setArticles(newArticles);
+
+        if (!showLoading && prevIdsRef.current.size > 0) {
+          const newIds = newArticles.filter((a) => !prevIdsRef.current.has(a.id));
+          if (newIds.length > 0) {
+            setNewArticleCount((prev) => prev + newIds.length);
+          }
+        }
+        prevIdsRef.current = new Set(newArticles.map((a) => a.id));
       }
       if (featuredRes.status === "fulfilled") {
         setFeatured(featuredRes.value.articles);
       }
-      if (briefingRes.status === "fulfilled") {
+      if (briefingRes.status === "fulfilled" && briefingRes.value) {
         setBriefing(briefingRes.value);
+      }
+      if (metaRes.status === "fulfilled") {
+        setMeta(metaRes.value);
       }
 
       if (newsRes.status === "rejected" && featuredRes.status === "rejected" && briefingRes.status === "rejected") {
@@ -69,5 +87,18 @@ export function useNews(category: string) {
     };
   }, [load]);
 
-  return { articles, featured, briefing, loading, lastUpdated, error, refresh: () => load(false) };
+  const dismissNewArticles = useCallback(() => setNewArticleCount(0), []);
+
+  return {
+    articles,
+    featured,
+    briefing,
+    meta,
+    loading,
+    lastUpdated,
+    error,
+    newArticleCount,
+    dismissNewArticles,
+    refresh: () => load(false),
+  };
 }

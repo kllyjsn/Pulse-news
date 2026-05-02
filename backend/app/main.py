@@ -104,6 +104,7 @@ _article_cache: TTLCache[str, list[Article]] = TTLCache(maxsize=64, ttl=90)
 _briefing_cache: TTLCache[str, BriefingResponse] = TTLCache(maxsize=16, ttl=300)
 _content_cache: TTLCache[str, ArticleContent] = TTLCache(maxsize=128, ttl=600)
 _fetch_lock = asyncio.Lock()
+_category_locks: dict[str, asyncio.Lock] = {}
 
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", os.getenv("Perplexity_API_KEY", ""))
 
@@ -169,13 +170,23 @@ def _parse_date(entry: dict) -> datetime | None:
 
 
 async def _fetch_feed(client: httpx.AsyncClient, source: FeedSource) -> list[Article]:
-    """Fetch and parse a single RSS feed."""
-    try:
-        resp = await client.get(source.url, timeout=12.0)
-        resp.raise_for_status()
-        feed = feedparser.parse(resp.text)
-    except Exception:
+    """Fetch and parse a single RSS feed with retry."""
+    text = None
+    for attempt in range(3):
+        try:
+            resp = await client.get(source.url, timeout=12.0)
+            resp.raise_for_status()
+            text = resp.text
+            break
+        except Exception:
+            if attempt < 2:
+                await asyncio.sleep(1 * (attempt + 1))
+            else:
+                return []
+
+    if text is None:
         return []
+    feed = feedparser.parse(text)
 
     articles: list[Article] = []
     for entry in feed.entries[:15]:
@@ -286,7 +297,7 @@ async def _fetch_all_categories() -> list[Article]:
 
 @app.get("/api/health", response_model=HealthResponse)
 async def health():
-    return HealthResponse(status="ok", version="1.0.0")
+    return HealthResponse(status="ok", version="2.0.0")
 
 
 @app.get("/api/categories")
@@ -297,7 +308,7 @@ async def get_categories():
 @app.get("/api/news", response_model=NewsResponse)
 async def get_news(
     category: str = Query("all", description="Category filter"),
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(100, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
     if category == "all":
@@ -347,6 +358,67 @@ async def get_featured(limit: int = Query(6, ge=1, le=20)):
         updated_at=datetime.now(timezone.utc),
         total=len(featured),
     )
+
+
+def _cluster_articles(articles: list[Article]) -> dict:
+    """Compute story clusters and trending/breaking metadata."""
+    import difflib
+
+    now = datetime.now(timezone.utc)
+    breaking_ids: list[str] = []
+    trending_ids: list[str] = []
+    cluster_counts: dict[str, int] = {}
+
+    # Breaking: published in last 2 hours
+    for a in articles:
+        if a.published:
+            age = (now - a.published).total_seconds()
+            if age < 7200:
+                breaking_ids.append(a.id)
+
+    # Cluster by title similarity
+    title_keys: list[tuple[str, str]] = []
+    for a in articles:
+        key = re.sub(r"[^a-z0-9 ]", "", a.title.lower())[:80]
+        title_keys.append((a.id, key))
+
+    clusters: dict[str, list[str]] = {}
+    assigned: set[str] = set()
+
+    for i, (aid, akey) in enumerate(title_keys):
+        if aid in assigned:
+            continue
+        cluster = [aid]
+        assigned.add(aid)
+        for j, (bid, bkey) in enumerate(title_keys[i + 1:], i + 1):
+            if bid in assigned:
+                continue
+            ratio = difflib.SequenceMatcher(None, akey, bkey).ratio()
+            if ratio > 0.55:
+                cluster.append(bid)
+                assigned.add(bid)
+        if len(cluster) > 1:
+            for cid in cluster:
+                cluster_counts[cid] = len(cluster)
+            trending_ids.extend(cluster)
+
+    return {
+        "breaking_ids": list(set(breaking_ids)),
+        "trending_ids": list(set(trending_ids)),
+        "cluster_counts": cluster_counts,
+    }
+
+
+@app.get("/api/news/meta")
+async def get_news_meta(category: str = Query("all")):
+    """Return breaking/trending/cluster metadata for the current feed."""
+    if category == "all":
+        articles = await _fetch_all_categories()
+    elif category in CATEGORIES:
+        articles = await _fetch_category(category)
+    else:
+        articles = []
+    return _cluster_articles(articles)
 
 
 @app.get("/api/briefing", response_model=BriefingResponse)

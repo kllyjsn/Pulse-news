@@ -1,3 +1,4 @@
+import { useRef, useEffect, useState, useCallback } from "react";
 import { ArticleCard } from "./ArticleCard";
 import type { Article } from "../types";
 
@@ -5,7 +6,13 @@ interface NewsGridProps {
   articles: Article[];
   loading: boolean;
   onArticleClick: (article: Article) => void;
+  readArticles?: string[];
+  breakingIds?: Set<string>;
+  trendingIds?: Set<string>;
+  clusterCounts?: Map<string, number>;
 }
+
+const PAGE_SIZE = 20;
 
 function LoadingSkeleton() {
   return (
@@ -26,7 +33,43 @@ function LoadingSkeleton() {
   );
 }
 
-export function NewsGrid({ articles, loading, onArticleClick }: NewsGridProps) {
+export function NewsGrid({
+  articles,
+  loading,
+  onArticleClick,
+  readArticles = [],
+  breakingIds,
+  trendingIds,
+  clusterCounts,
+}: NewsGridProps) {
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const readSet = new Set(readArticles);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [articles]);
+
+  const handleIntersection = useCallback(
+    (entries: IntersectionObserverEntry[]) => {
+      if (entries[0]?.isIntersecting) {
+        setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, articles.length));
+      }
+    },
+    [articles.length]
+  );
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(handleIntersection, {
+      rootMargin: "200px",
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [handleIntersection]);
+
   if (loading) return <LoadingSkeleton />;
 
   if (articles.length === 0) {
@@ -38,11 +81,36 @@ export function NewsGrid({ articles, loading, onArticleClick }: NewsGridProps) {
     );
   }
 
+  const visible = articles.slice(0, visibleCount);
+  const hasMore = visibleCount < articles.length;
+
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      {articles.map((article, i) => (
-        <ArticleCard key={article.id} article={article} index={i} onClick={onArticleClick} />
-      ))}
-    </div>
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {visible.map((article, i) => (
+          <ArticleCard
+            key={article.id}
+            article={article}
+            index={i}
+            onClick={onArticleClick}
+            isRead={readSet.has(article.id)}
+            isBreaking={breakingIds?.has(article.id)}
+            isTrending={trendingIds?.has(article.id)}
+            clusterCount={clusterCounts?.get(article.id)}
+          />
+        ))}
+      </div>
+
+      {hasMore && (
+        <div ref={sentinelRef} className="flex justify-center py-8">
+          <button
+            onClick={() => setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, articles.length))}
+            className="px-6 py-2.5 rounded-xl bg-surface-2 border border-border text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors"
+          >
+            Load more ({articles.length - visibleCount} remaining)
+          </button>
+        </div>
+      )}
+    </>
   );
 }

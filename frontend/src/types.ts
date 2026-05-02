@@ -32,7 +32,7 @@ export interface CategoryInfo {
 
 export type CategoryMap = Record<string, CategoryInfo>;
 
-export type CategoryKey = "all" | "tech" | "ai" | "business" | "money" | "geopolitics";
+export type CategoryKey = "all" | "tech" | "ai" | "business" | "money" | "geopolitics" | "saved";
 
 export interface ArticleContent {
   url: string;
