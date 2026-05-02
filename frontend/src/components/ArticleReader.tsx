@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Clock, BookOpen, ExternalLink, Loader2, RotateCcw } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { fetchArticleContent } from "../lib/api";
+import { BookmarkButton } from "./BookmarkButton";
+import { ShareButton } from "./ShareButton";
 import type { Article, ArticleContent } from "../types";
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -24,6 +26,7 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
   const [error, setError] = useState(false);
   const [readProgress, setReadProgress] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const startXRef = useRef<number | null>(null);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -72,6 +75,20 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
     return () => window.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    startXRef.current = e.touches[0].clientX;
+  }, []);
+
+  const handleTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      if (startXRef.current === null) return;
+      const diff = e.changedTouches[0].clientX - startXRef.current;
+      if (diff > 80) onClose();
+      startXRef.current = null;
+    },
+    [onClose]
+  );
+
   const color = article ? CATEGORY_COLORS[article.category] || "#6366f1" : "#6366f1";
 
   return (
@@ -86,6 +103,7 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
             transition={{ duration: 0.2 }}
             className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm"
             onClick={onClose}
+            aria-hidden="true"
           />
 
           {/* Reader panel */}
@@ -96,7 +114,17 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
             transition={{ type: "spring", damping: 30, stiffness: 300 }}
             className="fixed inset-y-0 right-0 z-50 w-full sm:w-[min(700px,90vw)] bg-surface overflow-hidden
               flex flex-col border-l border-border shadow-2xl shadow-black/50"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Reading: ${article.title}`}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
           >
+            {/* Swipe indicator — mobile only */}
+            <div className="sm:hidden flex justify-center pt-2 pb-1">
+              <div className="w-10 h-1 rounded-full bg-border" />
+            </div>
+
             {/* Header bar */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-surface-2/50">
               <div className="flex items-center gap-2 min-w-0">
@@ -109,7 +137,7 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
                 <span className="text-xs text-text-muted truncate">{article.source}</span>
                 {article.published && (
                   <>
-                    <span className="text-text-muted text-[8px] shrink-0">•</span>
+                    <span className="text-text-muted text-[8px] shrink-0">·</span>
                     <span className="text-xs text-text-muted shrink-0 flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {formatDistanceToNow(new Date(article.published), { addSuffix: true })}
@@ -117,19 +145,23 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
                   </>
                 )}
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1 shrink-0">
+                <BookmarkButton articleId={article.id} size="md" />
+                <ShareButton article={article} size="md" />
                 <a
                   href={article.url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="p-2 rounded-lg hover:bg-surface-3 transition-colors text-text-secondary hover:text-text-primary"
                   title="Open original"
+                  aria-label="Open original article"
                 >
                   <ExternalLink className="w-4 h-4" />
                 </a>
                 <button
                   onClick={onClose}
                   className="p-2 rounded-lg hover:bg-surface-3 transition-colors text-text-secondary hover:text-text-primary"
+                  aria-label="Close reader"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -142,6 +174,11 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
                 <div
                   className="h-full bg-accent transition-all duration-150 ease-out"
                   style={{ width: `${readProgress}%` }}
+                  role="progressbar"
+                  aria-valuenow={readProgress}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="Reading progress"
                 />
               </div>
             )}
@@ -174,7 +211,7 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
                       <BookOpen className="w-4 h-4" />
                       {content.reading_time} min read
                     </span>
-                    <span>•</span>
+                    <span>·</span>
                     <span>{content.source}</span>
                   </div>
                 )}

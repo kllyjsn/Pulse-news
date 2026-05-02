@@ -1,6 +1,8 @@
 import { motion } from "framer-motion";
-import { Clock, BookOpen } from "lucide-react";
+import { Clock, BookOpen, TrendingUp } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { BookmarkButton } from "./BookmarkButton";
+import { ShareButton } from "./ShareButton";
 import type { Article } from "../types";
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -15,9 +17,13 @@ interface ArticleCardProps {
   article: Article;
   index: number;
   onClick: (article: Article) => void;
+  isRead?: boolean;
+  isBreaking?: boolean;
+  isTrending?: boolean;
+  clusterCount?: number;
 }
 
-export function ArticleCard({ article, index, onClick }: ArticleCardProps) {
+export function ArticleCard({ article, index, onClick, isRead, isBreaking, isTrending, clusterCount }: ArticleCardProps) {
   const color = CATEGORY_COLORS[article.category] || "#6366f1";
 
   return (
@@ -26,7 +32,9 @@ export function ArticleCard({ article, index, onClick }: ArticleCardProps) {
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, delay: Math.min(index * 0.04, 0.5), ease: "easeOut" }}
-      className="group flex flex-col rounded-xl border border-border bg-surface-2/50 card-glow overflow-hidden text-left cursor-pointer"
+      className={`group flex flex-col rounded-xl border card-glow overflow-hidden text-left cursor-pointer
+        ${isRead ? "border-border/50 bg-surface-2/30 opacity-75" : "border-border bg-surface-2/50"}`}
+      aria-label={`Read article: ${article.title}`}
     >
       {/* Image */}
       {article.image_url && (
@@ -41,15 +49,53 @@ export function ArticleCard({ article, index, onClick }: ArticleCardProps) {
             }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-surface-2 to-transparent opacity-60" />
+
+          {/* Badges overlay */}
+          <div className="absolute top-2 left-2 flex items-center gap-1.5">
+            {isBreaking && (
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-red-500 text-white animate-pulse">
+                Breaking
+              </span>
+            )}
+            {isTrending && (
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-amber-500/90 text-white flex items-center gap-1">
+                <TrendingUp className="w-2.5 h-2.5" />
+                Trending
+              </span>
+            )}
+          </div>
+
+          {/* Action buttons overlay */}
+          <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <BookmarkButton articleId={article.id} />
+            <ShareButton article={article} />
+          </div>
         </div>
       )}
 
       {/* Content */}
       <div className="flex flex-col flex-1 p-4">
+        {/* Badges for cards without images */}
+        {!article.image_url && (isBreaking || isTrending) && (
+          <div className="flex items-center gap-1.5 mb-2">
+            {isBreaking && (
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-red-500 text-white animate-pulse">
+                Breaking
+              </span>
+            )}
+            {isTrending && (
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-amber-500/90 text-white flex items-center gap-1">
+                <TrendingUp className="w-2.5 h-2.5" />
+                Trending
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Meta row */}
         <div className="flex items-center gap-2 mb-2.5">
           <span
-            className="w-6 h-6 rounded-md flex items-center justify-center text-[9px] font-bold"
+            className="w-6 h-6 rounded-md flex items-center justify-center text-[9px] font-bold shrink-0"
             style={{
               background: `${color}20`,
               color: color,
@@ -58,7 +104,7 @@ export function ArticleCard({ article, index, onClick }: ArticleCardProps) {
             {article.source_icon}
           </span>
           <span className="text-xs text-text-muted font-medium truncate">{article.source}</span>
-          <span className="text-text-muted text-[8px]">•</span>
+          <span className="text-text-muted text-[8px]">·</span>
           <span
             className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wider"
             style={{
@@ -71,7 +117,8 @@ export function ArticleCard({ article, index, onClick }: ArticleCardProps) {
         </div>
 
         {/* Title */}
-        <h3 className="font-serif font-semibold text-base leading-snug text-text-primary group-hover:text-white transition-colors line-clamp-3 mb-2">
+        <h3 className={`font-serif font-semibold text-base leading-snug group-hover:text-white transition-colors line-clamp-3 mb-2
+          ${isRead ? "text-text-secondary" : "text-text-primary"}`}>
           {article.title}
         </h3>
 
@@ -93,10 +140,23 @@ export function ArticleCard({ article, index, onClick }: ArticleCardProps) {
               <BookOpen className="w-3 h-3" />
               {article.reading_time} min
             </span>
+            {clusterCount && clusterCount > 1 && (
+              <span className="text-accent font-medium">
+                +{clusterCount - 1} sources
+              </span>
+            )}
           </div>
-          <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-accent text-xs font-medium">
-            Read →
-          </span>
+          <div className="flex items-center gap-1">
+            {!article.image_url && (
+              <>
+                <BookmarkButton articleId={article.id} />
+                <ShareButton article={article} />
+              </>
+            )}
+            <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-accent text-xs font-medium">
+              Read →
+            </span>
+          </div>
         </div>
       </div>
     </motion.button>

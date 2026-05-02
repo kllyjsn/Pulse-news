@@ -8,7 +8,7 @@ async function fetchJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return res.json();
 }
 
-export function fetchNews(category = "all", limit = 50, offset = 0, signal?: AbortSignal) {
+export function fetchNews(category = "all", limit = 100, offset = 0, signal?: AbortSignal) {
   return fetchJson<NewsResponse>(
     `/api/news?category=${category}&limit=${limit}&offset=${offset}`,
     signal
@@ -32,4 +32,14 @@ export function fetchArticleContent(url: string, signal?: AbortSignal) {
     `/api/article?url=${encodeURIComponent(url)}`,
     signal
   );
+}
+
+export interface NewsMeta {
+  breaking_ids: string[];
+  trending_ids: string[];
+  cluster_counts: Record<string, number>;
+}
+
+export function fetchNewsMeta(category = "all", signal?: AbortSignal) {
+  return fetchJson<NewsMeta>(`/api/news/meta?category=${category}`, signal);
 }
